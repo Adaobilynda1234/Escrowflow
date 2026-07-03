@@ -1,5 +1,11 @@
+import crypto from 'crypto';
 import axios from 'axios';
 import { AppError } from '../middleware/errorHandler.js';
+
+const REQUIRED_ENV = ['NOMBA_BASE_URL', 'NOMBA_API_KEY', 'NOMBA_ACCOUNT_ID'] as const;
+for (const key of REQUIRED_ENV) {
+  if (!process.env[key]) throw new Error(`Missing required env var: ${key}`);
+}
 
 const nombaClient = axios.create({
   baseURL: process.env.NOMBA_BASE_URL,
@@ -49,7 +55,8 @@ export async function createVirtualAccount(
     };
   } catch (err: unknown) {
     if (err instanceof AppError) throw err;
-    throw new AppError(502, `Nomba API error: ${(err as Error).message}`);
+    console.error('[Nomba] API error:', err);
+    throw new AppError(502, 'Payment provider error');
   }
 }
 
@@ -58,7 +65,7 @@ export async function initiateTransfer(params: TransferParams): Promise<Transfer
     const res = await nombaClient.post(
       '/transfers',
       {
-        amount: params.amountKobo,
+        amount: params.amountKobo / 100, // convert kobo → naira
         destinationAccountNumber: params.destinationAccountNumber,
         destinationBankCode: params.destinationBankCode,
         narration: params.narration,
@@ -73,14 +80,13 @@ export async function initiateTransfer(params: TransferParams): Promise<Transfer
     };
   } catch (err: unknown) {
     if (err instanceof AppError) throw err;
-    throw new AppError(502, `Nomba transfer error: ${(err as Error).message}`);
+    console.error('[Nomba] API error:', err);
+    throw new AppError(502, 'Payment provider error');
   }
 }
 
 export function verifyWebhookSignature(payload: string, signature: string): boolean {
   // ponytail: sync crypto — fine for webhook verify; no async needed here
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const crypto = require('crypto') as typeof import('crypto');
   const expected = crypto
     .createHmac('sha256', process.env.NOMBA_WEBHOOK_SECRET ?? '')
     .update(payload)
