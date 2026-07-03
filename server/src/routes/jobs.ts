@@ -7,6 +7,7 @@ import { User } from '../models/User.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { AppError } from '../middleware/errorHandler.js';
+import { createVirtualAccount } from '../services/nomba.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -120,6 +121,31 @@ router.patch('/:id/cancel', async (req, res, next) => {
     }
     job.status = 'CANCELLED';
     await job.save();
+    res.json({ success: true, data: { job } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.patch('/:id/fund-account', async (req, res, next) => {
+  try {
+    const job = await Job.findById(req.params.id);
+    if (!job) throw new AppError(404, 'Job not found');
+    if (String(job.clientId) !== req.user!.userId) {
+      throw new AppError(403, 'Only the client can trigger account funding');
+    }
+    if (job.status !== 'CREATED') {
+      throw new AppError(400, 'Virtual account can only be created for jobs in CREATED status');
+    }
+
+    const va = await createVirtualAccount(String(job._id), job.totalAmountKobo);
+
+    job.virtualAccountNumber = va.accountNumber;
+    job.virtualAccountBank = va.bankName;
+    job.virtualAccountReference = va.reference;
+    job.status = 'FUNDING_PENDING';
+    await job.save();
+
     res.json({ success: true, data: { job } });
   } catch (err) {
     next(err);
