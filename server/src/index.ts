@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { connectDB } from './config/db.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import authRouter from './routes/auth.js';
 
 const app = express();
 
@@ -16,6 +17,8 @@ app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
 });
+
+app.use('/auth', authRouter);
 
 app.use(errorHandler);
 
