@@ -15,8 +15,8 @@ router.use(requireAuth, requireRole('ADMIN'));
 // GET /admin/jobs — list all jobs with optional ?status= filter
 router.get('/jobs', async (req, res, next) => {
   try {
-    const filter = req.query.status ? { status: req.query.status } : {};
-    const jobs = await Job.find(filter)
+    const statusFilter = typeof req.query.status === 'string' ? { status: req.query.status } : {};
+    const jobs = await Job.find(statusFilter)
       .populate('clientId', 'name email')
       .populate('providerId', 'name email')
       .sort({ createdAt: -1 });
@@ -48,20 +48,24 @@ router.patch('/milestones/:id/resolve', validate(resolveSchema), async (req, res
       // Refund flow
       const idempotencyKey = `refund-${milestone._id}`;
       const session = await mongoose.startSession();
-      await session.withTransaction(async () => {
-        await Milestone.findByIdAndUpdate(milestone._id, { status: 'REFUNDED' }, { session });
-        await debitHeldFundsForRefund(
-          String(job._id),
-          milestone.amountKobo,
-          idempotencyKey,
-          session
-        );
-        await Job.findByIdAndUpdate(job._id, {
-          $inc: { heldAmountKobo: -milestone.amountKobo },
-          $set: { status: 'REFUND_PENDING' },
-        }, { session });
-      });
-      session.endSession();
+      try {
+        await session.withTransaction(async () => {
+          await Milestone.findByIdAndUpdate(milestone._id, { status: 'REFUNDED' }, { session });
+          await debitHeldFundsForRefund(
+            String(job._id),
+            milestone.amountKobo,
+            idempotencyKey,
+            session
+          );
+          // debitHeldFundsForRefund already decrements heldAmountKobo; override status only
+          // ponytail: $inc skipped here — ledger helper already did it, double-write would corrupt balance
+          await Job.findByIdAndUpdate(job._id, {
+            $set: { status: 'REFUND_PENDING' },
+          }, { session });
+        });
+      } finally {
+        session.endSession();
+      }
       // ponytail: actual bank transfer is out of scope for MVP — ledger records the refund
     }
 
