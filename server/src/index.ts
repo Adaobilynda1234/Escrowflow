@@ -4,6 +4,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { connectDB } from './config/db.js';
+import { startAutoReleaseJob } from './jobs/autoRelease.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import authRouter from './routes/auth.js';
 import jobsRouter from './routes/jobs.js';
@@ -37,6 +38,7 @@ app.listen(PORT, () => {
   connectDB().catch((err: Error) => {
     console.error('MongoDB connection failed:', err.message);
   });
+  startAutoReleaseJob();
 });
 
 export default app;
