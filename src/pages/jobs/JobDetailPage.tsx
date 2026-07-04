@@ -169,7 +169,7 @@ export default function JobDetailPage() {
             {m.evidenceUrls && m.evidenceUrls.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-2">
                 {m.evidenceUrls.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 underline">
+                  <a key={i} href={/^https?:\/\//i.test(url) ? url : '#'} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-500 underline">
                     Evidence {i + 1}
                   </a>
                 ))}

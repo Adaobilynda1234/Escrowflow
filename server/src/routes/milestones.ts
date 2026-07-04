@@ -11,7 +11,12 @@ const router = Router();
 router.use(requireAuth);
 
 const completeSchema = z.object({
-  evidenceUrls: z.array(z.string().url().max(2048)).max(10).optional(),
+  evidenceUrls: z.array(
+    z.string().url().max(2048).refine(
+      u => { try { const p = new URL(u).protocol; return p === 'http:' || p === 'https:'; } catch { return false; } },
+      'Only http(s) URLs allowed'
+    )
+  ).max(10).optional(),
 });
 
 // Provider marks milestone complete
