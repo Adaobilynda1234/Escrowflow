@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
+import QRCode from 'react-qr-code';
 import api from '../../api/client';
 import { useJobStore, type Job, type Milestone } from '../../store/jobStore';
 import { useAuthStore } from '../../store/authStore';
@@ -104,14 +105,21 @@ export default function JobDetailPage() {
 
       {job.virtualAccountNumber && job.status === 'FUNDING_PENDING' && (
         <div className="border-2 border-emerald-500 rounded-xl p-4 mb-6 bg-emerald-50 dark:bg-emerald-900/20">
-          <p className="font-semibold text-emerald-700 dark:text-emerald-400 mb-2">
-            Fund this job
-          </p>
-          <p className="text-sm">
-            Transfer {(job.totalAmountKobo / 100).toLocaleString('en-NG', { style: 'currency', currency: 'NGN' })} to:
-          </p>
-          <p className="text-2xl font-mono font-bold mt-2">{job.virtualAccountNumber}</p>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{job.virtualAccountBank}</p>
+          <p className="font-semibold text-emerald-700 dark:text-emerald-400 mb-2">Fund this job</p>
+          <p className="text-sm mb-3">Transfer <strong>{(job.totalAmountKobo / 100).toLocaleString('en-NG', { style: 'currency', currency: 'NGN' })}</strong> to:</p>
+          <div className="flex items-start gap-6">
+            <div>
+              <p className="text-2xl font-mono font-bold">{job.virtualAccountNumber}</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">{job.virtualAccountBank}</p>
+              <p className="text-xs text-gray-400 mt-1">Scan QR or copy account number above</p>
+            </div>
+            <div className="bg-white p-2 rounded-lg flex-shrink-0">
+              <QRCode
+                value={`${job.virtualAccountNumber}|${job.virtualAccountBank}|${job.totalAmountKobo}`}
+                size={100}
+              />
+            </div>
+          </div>
         </div>
       )}
 
