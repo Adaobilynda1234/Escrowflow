@@ -3,11 +3,13 @@ import mongoose from 'mongoose';
 import { z } from 'zod';
 import { Job } from '../models/Job.js';
 import { Milestone } from '../models/Milestone.js';
+import { User } from '../models/User.js';
 import { releaseMilestonePayout } from '../services/transfer.js';
 import { debitHeldFundsForRefund } from '../services/ledger.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
-import { AppError } from '../middleware/errorHandler.js';
+import { AppError } from '../middleware/errorHandler.js'
+import { safeEmail, sendRefundIssuedEmail } from '../services/email.js';
 
 const router = Router();
 router.use(requireAuth, requireRole('ADMIN'));
@@ -67,6 +69,12 @@ router.patch('/milestones/:id/resolve', validate(resolveSchema), async (req, res
         session.endSession();
       }
       // ponytail: actual bank transfer is out of scope for MVP — ledger records the refund
+
+      // Notify client of refund — fire-and-forget
+      const client = await User.findById(job.clientId).select('email');
+      if (client?.email) {
+        safeEmail(() => sendRefundIssuedEmail(client.email, milestone.title, milestone.amountKobo));
+      }
     }
 
     const updated = await Milestone.findById(req.params.id);

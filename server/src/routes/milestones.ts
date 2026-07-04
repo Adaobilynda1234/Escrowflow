@@ -4,7 +4,8 @@ import { Milestone } from '../models/Milestone.js';
 import { Job } from '../models/Job.js';
 import { requireAuth } from '../middleware/auth.js';
 import { AppError } from '../middleware/errorHandler.js';
-import { releaseMilestonePayout } from '../services/transfer.js';
+import { releaseMilestonePayout } from '../services/transfer.js'
+import { safeEmail, sendDisputeOpenedEmail } from '../services/email.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -106,6 +107,15 @@ router.patch('/:id/dispute', async (req, res, next) => {
       { new: true }
     );
     await Job.findByIdAndUpdate(job._id, { status: 'DISPUTED' });
+
+    // Notify both parties — fire-and-forget
+    const jobWithParties = await Job.findById(job._id)
+      .populate<{ clientId: { email: string } }>('clientId', 'email')
+      .populate<{ providerId: { email: string } }>('providerId', 'email');
+    const clientEmail = (jobWithParties?.clientId as unknown as { email: string })?.email;
+    const providerEmail = (jobWithParties?.providerId as unknown as { email: string })?.email;
+    if (clientEmail) safeEmail(() => sendDisputeOpenedEmail(clientEmail, job.title));
+    if (providerEmail) safeEmail(() => sendDisputeOpenedEmail(providerEmail, job.title));
 
     res.json({ success: true, data: updated });
   } catch (err) {

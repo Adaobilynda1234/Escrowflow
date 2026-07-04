@@ -5,7 +5,8 @@ import { Job } from '../models/Job.js';
 import { User } from '../models/User.js';
 import { debitHeldFundsForRelease } from './ledger.js';
 import { initiateTransfer } from './nomba.js';
-import { AppError } from '../middleware/errorHandler.js';
+import { AppError } from '../middleware/errorHandler.js'
+import { safeEmail, sendMilestoneApprovedEmail } from './email.js';
 
 export async function releaseMilestonePayout(milestoneId: string): Promise<void> {
   // Idempotency guard — check milestone status before touching money
@@ -17,7 +18,7 @@ export async function releaseMilestonePayout(milestoneId: string): Promise<void>
   if (!job) throw new AppError(404, 'Job not found');
 
   // Check bank details BEFORE opening a transaction — graceful degradation if missing
-  const provider = await User.findById(job.providerId).select('bankAccountNumber bankCode name');
+  const provider = await User.findById(job.providerId).select('bankAccountNumber bankCode name email');
   if (!provider?.bankAccountNumber || !provider?.bankCode) {
     // Bank details not yet collected (added in Task 13) — hold at APPROVED, no money moved
     await Milestone.findByIdAndUpdate(milestoneId, { status: 'APPROVED' });
@@ -84,6 +85,9 @@ export async function releaseMilestonePayout(milestoneId: string): Promise<void>
 
     if (result.status === 'success') {
       await Milestone.findByIdAndUpdate(milestoneId, { status: 'TRANSFER_SUCCESS' });
+      if (provider.email) {
+        safeEmail(() => sendMilestoneApprovedEmail(provider.email!, milestone.title, milestone.amountKobo));
+      }
       // Close job when all milestones are paid out
       const remaining = await Milestone.countDocuments({
         jobId: job._id,

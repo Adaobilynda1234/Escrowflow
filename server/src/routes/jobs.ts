@@ -7,7 +7,8 @@ import { User } from '../models/User.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { AppError } from '../middleware/errorHandler.js';
-import { createVirtualAccount } from '../services/nomba.js';
+import { createVirtualAccount } from '../services/nomba.js'
+import { safeEmail, sendJobCreatedEmail } from '../services/email.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -66,6 +67,13 @@ router.post('/', validate(createJobSchema), async (req, res, next) => {
       .populate('clientId', 'name email')
       .populate('providerId', 'name email');
     const createdMilestones = await Milestone.find({ jobId: jobId! }).sort('order');
+
+    // Fire-and-forget — email failure must not block job creation response
+    const providerEmailAddr = (job?.providerId as unknown as { email: string })?.email;
+    if (providerEmailAddr) {
+      safeEmail(() => sendJobCreatedEmail(providerEmailAddr, job!.title));
+    }
+
     res.status(201).json({ success: true, data: { job, milestones: createdMilestones } });
   } catch (err) {
     next(err);
