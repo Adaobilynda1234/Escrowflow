@@ -17,7 +17,11 @@ const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173' }));
-app.use(express.json());
+// ponytail: exclude webhook path so express.raw() in payments.ts receives the raw Buffer for HMAC
+app.use((req, res, next) => {
+  if (req.path.startsWith('/payments/webhook')) return next();
+  express.json()(req, res, next);
+});
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100 }));
 
 app.get('/health', (_req, res) => {

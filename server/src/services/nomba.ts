@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import axios from 'axios';
 import { AppError } from '../middleware/errorHandler.js';
 
@@ -83,13 +82,4 @@ export async function initiateTransfer(params: TransferParams): Promise<Transfer
     console.error('[Nomba] API error:', err);
     throw new AppError(502, 'Payment provider error');
   }
-}
-
-export function verifyWebhookSignature(payload: string, signature: string): boolean {
-  // ponytail: sync crypto — fine for webhook verify; no async needed here
-  const expected = crypto
-    .createHmac('sha256', process.env.NOMBA_WEBHOOK_SECRET ?? '')
-    .update(payload)
-    .digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(signature));
 }

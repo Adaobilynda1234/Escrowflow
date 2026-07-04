@@ -5,6 +5,7 @@ import JobsListPage from '../jobs/JobsListPage';
 import CreateJobPage from '../jobs/CreateJobPage';
 import JobDetailPage from '../jobs/JobDetailPage';
 import AdminPage from '../admin/AdminPage';
+import BankAccountPage from '../profile/BankAccountPage';
 
 export default function DashboardPage() {
   const { user, logout, loadUser } = useAuthStore();
@@ -22,6 +23,9 @@ export default function DashboardPage() {
         <div className="flex items-center gap-4">
           <Link to="/dashboard/jobs" className="text-sm hover:underline">
             My Jobs
+          </Link>
+          <Link to="/dashboard/profile/bank" className="text-sm hover:underline">
+            Bank Account
           </Link>
           {user?.roles.includes('ADMIN') && (
             <Link to="/dashboard/admin" className="text-sm hover:underline">Admin</Link>
@@ -53,6 +57,7 @@ export default function DashboardPage() {
           <Route path="jobs/new" element={<CreateJobPage />} />
           <Route path="jobs/:id" element={<JobDetailPage />} />
           <Route path="admin" element={<AdminPage />} />
+          <Route path="profile/bank" element={<BankAccountPage />} />
         </Routes>
       </main>
     </div>

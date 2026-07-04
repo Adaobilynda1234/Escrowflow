@@ -56,10 +56,7 @@ export async function releaseMilestonePayout(milestoneId: string): Promise<void>
         idempotencyKey,
         session
       );
-
-      await Job.findByIdAndUpdate(job._id, {
-        $inc: { heldAmountKobo: -milestone.amountKobo, releasedAmountKobo: milestone.amountKobo }
-      }, { session });
+      // ponytail: ledger.debitHeldFundsForRelease already updates heldAmountKobo/releasedAmountKobo on Job
     });
   } finally {
     session.endSession();
@@ -74,6 +71,11 @@ export async function releaseMilestonePayout(milestoneId: string): Promise<void>
       destinationBankCode: provider.bankCode,
       narration: `EscrowFlow: ${job.title} - ${milestone.title}`,
     });
+
+    // H2: guard against error envelopes or unexpected shapes from Nomba
+    if (!result || !result.status) {
+      throw new AppError(502, 'Payment provider error: unexpected response shape');
+    }
 
     await Transfer.findOneAndUpdate(
       { idempotencyKey },
