@@ -22,20 +22,25 @@ router.post(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const rawBody = req.body as Buffer;
-      const signature = req.headers['x-nomba-signature'] as string | undefined;
+      const signature = req.headers['nomba-signature'] as string | undefined;
 
       // Verify HMAC-SHA256 signature over raw bytes
-      const expected = crypto
+      // Nomba may deliver the signature as hex or base64 — accept both
+      const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET).update(rawBody);
+      const expectedHex = hmac.digest('hex');
+      const expectedB64 = crypto
         .createHmac('sha256', WEBHOOK_SECRET)
         .update(rawBody)
-        .digest('hex');
+        .digest('base64');
 
-      // timingSafeEqual requires equal-length buffers; decode both as hex
-      const sigBuf = Buffer.from(signature ?? '', 'hex');
-      const expBuf = Buffer.from(expected, 'hex');
-      const valid =
-        sigBuf.length === expBuf.length &&
-        crypto.timingSafeEqual(sigBuf, expBuf);
+      const sig = signature ?? '';
+      const matchHex =
+        sig.length === expectedHex.length &&
+        crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedHex));
+      const matchB64 =
+        sig.length === expectedB64.length &&
+        crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedB64));
+      const valid = matchHex || matchB64;
 
       if (!valid) {
         res.status(401).json({ error: 'Invalid signature' });
@@ -83,13 +88,14 @@ router.post(
         }
         const jobId = accountReference.slice(4); // 'job-'.length === 4
 
-        // Fix 5: Integer validation for amount
-        const amountKobo = eventData.amount;
-        if (!Number.isInteger(amountKobo) || (amountKobo as number) <= 0) {
-          console.error('[Webhook] Invalid amount in payload:', amountKobo);
+        // Nomba sends amount in naira (their API unit); convert to kobo for storage
+        const rawAmount = Number(eventData.amount);
+        if (!rawAmount || rawAmount <= 0) {
+          console.error('[Webhook] Invalid amount in payload:', eventData.amount);
           res.status(400).json({ error: 'Invalid amount' });
           return;
         }
+        const amountKobo = Math.round(rawAmount * 100);
 
         const job = await Job.findById(jobId);
 
