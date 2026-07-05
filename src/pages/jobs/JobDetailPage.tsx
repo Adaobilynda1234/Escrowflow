@@ -78,6 +78,21 @@ export default function JobDetailPage() {
     }
   }
 
+  async function handleCancel() {
+    if (!id) return;
+    if (!confirm('Cancel this job? This cannot be undone.')) return;
+    setActionLoading('cancel');
+    setError(null);
+    try {
+      await api.patch(`/jobs/${id}/cancel`);
+      await load();
+    } catch {
+      setError('Failed to cancel job. Jobs can only be cancelled before funding.');
+    } finally {
+      setActionLoading(null);
+    }
+  }
+
   async function handleDispute(milestoneId: string) {
     if (!confirm('Raise a dispute? Funds will be locked until admin review.')) return;
     setActionLoading(milestoneId);
@@ -157,6 +172,18 @@ export default function JobDetailPage() {
               />
             </div>
           </div>
+        </div>
+      )}
+
+      {isClient && (job.status === 'CREATED' || job.status === 'FUNDING_PENDING') && (
+        <div className="mb-6 flex justify-end">
+          <button
+            onClick={handleCancel}
+            disabled={actionLoading === 'cancel'}
+            className="text-sm text-red-500 hover:text-red-700 hover:underline disabled:opacity-50"
+          >
+            {actionLoading === 'cancel' ? 'Cancelling...' : 'Cancel Job'}
+          </button>
         </div>
       )}
 
