@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
 import { useAuthStore } from '../../store/authStore';
-import { Navigate } from 'react-router-dom';
+import { Navigate, Link } from 'react-router-dom';
 
 interface Stats {
   totalHeldKobo: number;
@@ -49,6 +49,23 @@ export default function AdminPage() {
         <StatCard label="Active Disputes" value={String(stats.activeDisputes)} sub={stats.activeDisputes > 0 ? 'needs attention' : 'all clear'} />
         <StatCard label="Completion Rate" value={`${stats.completionRate}%`} sub="jobs fully completed" />
       </div>
+
+      {stats.activeDisputes > 0 && (
+        <div className="mb-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-xl flex items-center justify-between">
+          <div>
+            <p className="font-semibold text-red-700 dark:text-red-400">
+              {stats.activeDisputes} dispute{stats.activeDisputes !== 1 ? 's' : ''} need attention
+            </p>
+            <p className="text-sm text-red-600 dark:text-red-300">Review and resolve disputed milestones</p>
+          </div>
+          <Link
+            to="/dashboard/admin/disputes"
+            className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm"
+          >
+            Manage Disputes →
+          </Link>
+        </div>
+      )}
 
       <h2 className="font-semibold mb-3">Jobs by Status</h2>
       <div className="border rounded-xl overflow-hidden dark:border-gray-700">

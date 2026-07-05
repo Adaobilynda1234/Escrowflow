@@ -5,6 +5,7 @@ import JobsListPage from '../jobs/JobsListPage';
 import CreateJobPage from '../jobs/CreateJobPage';
 import JobDetailPage from '../jobs/JobDetailPage';
 import AdminPage from '../admin/AdminPage';
+import AdminDisputesPage from '../admin/AdminDisputesPage';
 import BankAccountPage from '../profile/BankAccountPage';
 
 export default function DashboardPage() {
@@ -57,6 +58,7 @@ export default function DashboardPage() {
           <Route path="jobs/new" element={<CreateJobPage />} />
           <Route path="jobs/:id" element={<JobDetailPage />} />
           <Route path="admin" element={<AdminPage />} />
+          <Route path="admin/disputes" element={<AdminDisputesPage />} />
           <Route path="profile/bank" element={<BankAccountPage />} />
         </Routes>
       </main>

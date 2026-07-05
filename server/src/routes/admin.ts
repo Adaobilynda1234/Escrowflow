@@ -29,6 +29,23 @@ router.get('/jobs', async (req, res, next) => {
   }
 });
 
+// GET /admin/milestones?status=DISPUTED — list milestones with optional status filter
+router.get('/milestones', async (req, res, next) => {
+  try {
+    const filter = typeof req.query.status === 'string' ? { status: req.query.status } : {};
+    const milestones = await Milestone.find(filter)
+      .populate({
+        path: 'jobId',
+        select: 'title clientId',
+        populate: { path: 'clientId', select: 'name email' },
+      })
+      .sort({ createdAt: -1 });
+    res.json({ success: true, data: { milestones } });
+  } catch (err) {
+    next(err);
+  }
+});
+
 const resolveSchema = z.object({
   action: z.enum(['approve', 'refund']),
 });
