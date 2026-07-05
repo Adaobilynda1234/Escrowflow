@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -12,25 +12,44 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>
 
 export default function BankAccountPage() {
+  const [saved, setSaved] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const { register, handleSubmit, reset, formState: { errors, isSubmitting } } = useForm<FormData>({
     resolver: zodResolver(schema),
   })
 
   useEffect(() => {
     api.get('/profile/me').then(({ data }) => {
-      if (data.bankAccountNumber) reset(data)
-    })
+      const user = data.data?.user
+      if (user?.bankAccountNumber) reset(user)
+    }).catch(() => { /* silent — bank details just won't pre-fill */ })
   }, [reset])
 
   async function onSubmit(data: FormData) {
-    await api.patch('/profile/bank', data)
-    alert('Bank account saved!')
+    setSaved(false)
+    setSaveError(null)
+    try {
+      await api.patch('/profile/bank', data)
+      setSaved(true)
+    } catch {
+      setSaveError('Failed to save bank account. Please try again.')
+    }
   }
 
   return (
     <div className="p-6 max-w-md mx-auto">
       <h1 className="text-2xl font-bold mb-6">Bank Account Details</h1>
       <p className="text-sm text-gray-500 mb-4">Add your bank account to receive milestone payouts.</p>
+      {saved && (
+        <div className="mb-4 p-3 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-700 rounded-lg text-emerald-700 dark:text-emerald-400 text-sm">
+          Bank account saved successfully.
+        </div>
+      )}
+      {saveError && (
+        <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 rounded-lg text-red-700 dark:text-red-400 text-sm">
+          {saveError}
+        </div>
+      )}
       <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div>
           <label className="block text-sm font-medium mb-1">Account Number (10 digits)</label>

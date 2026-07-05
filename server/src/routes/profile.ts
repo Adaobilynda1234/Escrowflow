@@ -13,7 +13,7 @@ router.get('/me', async (req, res, next) => {
   try {
     const user = await User.findById(req.user!.userId).select('-passwordHash');
     if (!user) throw new AppError(404, 'User not found');
-    res.json(user);
+    res.json({ success: true, data: { user } });
   } catch (err) { next(err); }
 });
 
@@ -33,7 +33,7 @@ router.patch('/bank', validate(bankSchema), async (req, res, next) => {
       { new: true, select: '-passwordHash' }
     );
     if (!user) throw new AppError(404, 'User not found');
-    res.json(user);
+    res.json({ success: true, data: { user } });
   } catch (err) { next(err); }
 });
 
