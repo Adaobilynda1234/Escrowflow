@@ -78,7 +78,9 @@ router.post(
       );
 
       if (eventType === 'payment.received') {
-        const accountReference = eventData.accountReference as string;
+        const accountReference = typeof eventData.accountReference === 'string'
+          ? eventData.accountReference
+          : '';
 
         // Fix 5: Safe accountReference extraction
         if (!accountReference.startsWith('job-')) {

@@ -18,7 +18,14 @@ router.use(requireAuth, requireRole('ADMIN'));
 // GET /admin/jobs — list all jobs with optional ?status= filter
 router.get('/jobs', async (req, res, next) => {
   try {
-    const statusFilter = typeof req.query.status === 'string' ? { status: req.query.status } : {};
+    const VALID_JOB_STATUSES = new Set([
+      'CREATED', 'FUNDING_PENDING', 'FUNDED', 'IN_PROGRESS',
+      'COMPLETED', 'CANCELLED', 'DISPUTED', 'REFUND_PENDING', 'REFUNDED',
+    ]);
+    const rawJobStatus = req.query.status;
+    const statusFilter = typeof rawJobStatus === 'string' && VALID_JOB_STATUSES.has(rawJobStatus)
+      ? { status: rawJobStatus }
+      : {};
     const jobs = await Job.find(statusFilter)
       .populate('clientId', 'name email')
       .populate('providerId', 'name email')

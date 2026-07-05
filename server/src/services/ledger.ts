@@ -19,7 +19,7 @@ export async function creditHeldFunds(
         amountKobo,
         debitAccount: 'CLIENT',
         creditAccount: 'ESCROW',
-        reference: `nomba-credit-${jobId}`,
+        reference: `nomba-credit-${reference}`,
         meta: { source: 'nomba_webhook' },
       },
       {
@@ -28,7 +28,7 @@ export async function creditHeldFunds(
         amountKobo,
         debitAccount: 'ESCROW',
         creditAccount: 'HELD_FUNDS',
-        reference: `nomba-hold-${jobId}`,
+        reference: `nomba-hold-${reference}`,
         meta: { source: 'nomba_webhook' },
       },
     ],
