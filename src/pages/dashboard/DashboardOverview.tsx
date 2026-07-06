@@ -54,13 +54,15 @@ function ActivityIcon({ icon }: { icon: string }) {
 export default function DashboardOverview() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const { jobs, fetchJobs } = useJobStore();
   const { viewRole } = useViewStore();
   const { user } = useAuthStore();
 
   useEffect(() => {
+    setFetchError(null);
     fetchJobs();
-    api.get(`/profile/stats?role=${viewRole}`).then(r => setStats(r.data.data.stats)).catch(() => {});
+    api.get(`/profile/stats?role=${viewRole}`).then(r => setStats(r.data.data.stats)).catch(() => setFetchError('Failed to load dashboard data.'));
     api.get('/profile/activity').then(r => setActivities(r.data.data.activities)).catch(() => {});
   }, [viewRole, fetchJobs]);
 
@@ -75,6 +77,7 @@ export default function DashboardOverview() {
 
   return (
     <div className="p-8">
+      {fetchError && <div className="mb-6 p-3 bg-red-50 text-red-700 rounded-lg text-sm border border-red-200">{fetchError}</div>}
       {/* Stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {CARDS.map(c => (

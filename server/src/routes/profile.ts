@@ -146,13 +146,15 @@ const notificationsSchema = z.object({
 // PATCH /profile/notifications
 router.patch('/notifications', validate(notificationsSchema), async (req, res, next) => {
   try {
+    const existing = await User.findById(req.user!.userId).select('notificationPrefs');
+    if (!existing) throw new AppError(404, 'User not found');
+    const merged = { ...(DEFAULT_PREFS as object), ...(existing.notificationPrefs ?? {}), ...req.body };
     const user = await User.findByIdAndUpdate(
       req.user!.userId,
-      { notificationPrefs: req.body },
+      { notificationPrefs: merged },
       { new: true, select: 'notificationPrefs' }
     );
-    if (!user) throw new AppError(404, 'User not found');
-    res.json({ success: true, data: { prefs: user.notificationPrefs ?? DEFAULT_PREFS } });
+    res.json({ success: true, data: { prefs: user!.notificationPrefs ?? DEFAULT_PREFS } });
   } catch (err) { next(err); }
 });
 
