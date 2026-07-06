@@ -57,9 +57,9 @@ export default function NotificationsPage() {
           <p className="p-6 text-gray-400 text-sm">No activity yet. Create a project to get started.</p>
         )}
         <div className="divide-y divide-gray-50">
-          {activities.map((a, i) => (
+          {activities.map((a) => (
             // ponytail: composite key — activities have no _id; text+time combo is unique enough
-            <div key={`${a.time}-${i}`} className="flex items-start gap-4 px-6 py-4">
+            <div key={`${a.text}-${a.time}`} className="flex items-start gap-4 px-6 py-4">
               <div className="mt-0.5">
                 <ActivityIcon icon={a.icon} />
               </div>

@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { AlertCircle, CheckCircle, Lock, MessageSquare } from 'lucide-react';
 import api from '../../api/client';
 import { useViewStore } from '../../store/viewStore';
@@ -103,12 +102,12 @@ export default function UserDisputesPage() {
                   <div className="text-right">
                     <span
                       className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                        d.status === 'DISPUTED'
+                        d.status === 'Under Review'
                           ? 'bg-red-100 text-red-700'
                           : 'bg-gray-100 text-gray-500'
                       }`}
                     >
-                      {d.status === 'DISPUTED' ? 'Under Review' : 'Refunded'}
+                      {d.status}
                     </span>
                     <p className="text-sm font-semibold text-gray-900 mt-1">{fmt(d.amountKobo)}</p>
                   </div>
@@ -134,21 +133,13 @@ export default function UserDisputesPage() {
               <p className="text-lg font-bold text-gray-900 mb-4">{fmt(selected.amountKobo)}</p>
               <span
                 className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                  selected.status === 'DISPUTED'
+                  selected.status === 'Under Review'
                     ? 'bg-red-100 text-red-700'
                     : 'bg-gray-100 text-gray-500'
                 }`}
               >
-                {selected.status === 'DISPUTED' ? 'Under Review' : 'Refunded'}
+                {selected.status}
               </span>
-              <div className="mt-6 pt-4 border-t border-gray-100">
-                <p className="text-xs text-gray-400 mb-2">
-                  For dispute resolution, contact support or view the project:
-                </p>
-                <Link to="/dashboard/disputes" className="text-sm text-blue-600 hover:underline">
-                  View project details →
-                </Link>
-              </div>
             </div>
           )}
         </div>
