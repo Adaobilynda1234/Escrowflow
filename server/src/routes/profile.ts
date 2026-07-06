@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { User } from '../models/User.js';
 import { Job } from '../models/Job.js';
 import { Milestone } from '../models/Milestone.js';
+import { LedgerEntry } from '../models/LedgerEntry.js';
 import { requireAuth } from '../middleware/auth.js';
 import { validate } from '../middleware/validate.js';
 import { AppError } from '../middleware/errorHandler.js';
@@ -152,6 +153,156 @@ router.patch('/notifications', validate(notificationsSchema), async (req, res, n
     );
     if (!user) throw new AppError(404, 'User not found');
     res.json({ success: true, data: { prefs: user.notificationPrefs ?? DEFAULT_PREFS } });
+  } catch (err) { next(err); }
+});
+
+// GET /profile/transactions?role=CLIENT|PROVIDER&filter=all|incoming|outgoing
+router.get('/transactions', async (req, res, next) => {
+  try {
+    const userId = req.user!.userId;
+    const role = req.query.role === 'PROVIDER' ? 'PROVIDER' : 'CLIENT';
+    const filter = typeof req.query.filter === 'string' ? req.query.filter : 'all';
+    const jobFilter = role === 'CLIENT' ? { clientId: userId } : { providerId: userId };
+    const jobs = await Job.find(jobFilter).populate('clientId providerId', 'name').lean();
+    const jobMap = new Map(jobs.map(j => [j._id.toString(), j]));
+    const jobIds = jobs.map(j => j._id);
+
+    const entries = await LedgerEntry.find({ jobId: { $in: jobIds } })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean();
+
+    const now = new Date();
+    const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    let totalReceivedKobo = 0, totalPaidOutKobo = 0, pendingReleaseKobo = 0, thisMonthKobo = 0;
+
+    const rows = entries.map(e => {
+      const job = jobMap.get(e.jobId.toString());
+      const isIncoming = (role === 'CLIENT' && e.type === 'FUNDS_REFUNDED') ||
+                         (role === 'PROVIDER' && e.type === 'FUNDS_RELEASED');
+      const direction = isIncoming ? 'incoming' : 'outgoing';
+
+      if (isIncoming) totalReceivedKobo += e.amountKobo;
+      else totalPaidOutKobo += e.amountKobo;
+      if (new Date(e.createdAt) >= firstOfMonth) thisMonthKobo += e.amountKobo;
+
+      const typeLabel: Record<string, string> = {
+        FUNDS_RECEIVED: 'Escrow Funding',
+        FUNDS_HELD: 'Escrow Funding',
+        FUNDS_RELEASED: 'Milestone Release',
+        FUNDS_REFUNDED: 'Refund',
+      };
+      const counterparty = role === 'CLIENT'
+        ? (job?.providerId as { name: string } | undefined)?.name ?? 'Unknown'
+        : (job?.clientId as { name: string } | undefined)?.name ?? 'Unknown';
+
+      return {
+        txnId: `TXN-${e._id.toString().slice(-4).toUpperCase()}`,
+        project: job?.title ?? 'Unknown',
+        company: counterparty,
+        type: typeLabel[e.type] ?? e.type,
+        date: e.createdAt,
+        amountKobo: e.amountKobo,
+        direction,
+        status: 'Completed',
+      };
+    }).filter(r => filter === 'all' || r.direction === filter);
+
+    // Pending release = held funds on active jobs
+    const activeJobs = jobs.filter(j => ['FUNDED', 'IN_PROGRESS'].includes(j.status));
+    pendingReleaseKobo = activeJobs.reduce((s, j) => s + j.heldAmountKobo, 0);
+
+    res.json({
+      success: true,
+      data: {
+        stats: { totalReceivedKobo, totalPaidOutKobo, pendingReleaseKobo, thisMonthKobo },
+        transactions: rows,
+      },
+    });
+  } catch (err) { next(err); }
+});
+
+// GET /profile/disputes?role=CLIENT|PROVIDER
+router.get('/disputes', async (req, res, next) => {
+  try {
+    const userId = req.user!.userId;
+    const role = req.query.role === 'PROVIDER' ? 'PROVIDER' : 'CLIENT';
+    const jobFilter = role === 'CLIENT' ? { clientId: userId } : { providerId: userId };
+    const jobs = await Job.find(jobFilter).lean();
+    const jobMap = new Map(jobs.map(j => [j._id.toString(), j]));
+    const jobIds = jobs.map(j => j._id);
+
+    const milestones = await Milestone.find({
+      jobId: { $in: jobIds },
+      status: { $in: ['DISPUTED', 'REFUNDED', 'REFUND_PENDING'] },
+    }).sort({ updatedAt: -1 }).lean();
+
+    const open = milestones.filter(m => m.status === 'DISPUTED').length;
+    const resolved = milestones.filter(m => ['REFUNDED'].includes(m.status)).length;
+    const fundsAtRiskKobo = milestones
+      .filter(m => m.status === 'DISPUTED')
+      .reduce((s, m) => s + m.amountKobo, 0);
+
+    const disputes = milestones.map(m => {
+      const job = jobMap.get(m.jobId.toString());
+      return {
+        _id: m._id,
+        dspId: `DSP-${m._id.toString().slice(-4).toUpperCase()}`,
+        project: job?.title ?? 'Unknown',
+        milestone: m.title,
+        amountKobo: m.amountKobo,
+        status: m.status === 'DISPUTED' ? 'Under Review' : 'Resolved',
+        rawStatus: m.status,
+        updatedAt: (m as unknown as { updatedAt?: Date }).updatedAt,
+      };
+    });
+
+    res.json({ success: true, data: { stats: { open, resolved, fundsAtRiskKobo }, disputes } });
+  } catch (err) { next(err); }
+});
+
+// GET /profile/activity
+router.get('/activity', async (req, res, next) => {
+  try {
+    const userId = req.user!.userId;
+    const jobs = await Job.find({
+      $or: [{ clientId: userId }, { providerId: userId }],
+    }).lean();
+    const jobMap = new Map(jobs.map(j => [j._id.toString(), j]));
+    const jobIds = jobs.map(j => j._id);
+
+    const milestones = await Milestone.find({ jobId: { $in: jobIds } })
+      .sort({ updatedAt: -1 })
+      .limit(20)
+      .lean();
+
+    type ActivityRow = { icon: string; text: string; time: Date };
+    const activities: ActivityRow[] = [];
+
+    for (const m of milestones) {
+      const job = jobMap.get(m.jobId.toString());
+      const title = job?.title ?? 'Unknown';
+      if (m.status === 'APPROVED' || m.status === 'TRANSFER_SUCCESS') {
+        activities.push({ icon: 'check', text: `Milestone approved: ${m.title}`, time: m.approvedAt ?? (m as unknown as { updatedAt?: Date }).updatedAt ?? new Date() });
+      } else if (m.status === 'PROVIDER_MARKED_COMPLETE') {
+        activities.push({ icon: 'clock', text: `${title} marked milestone complete`, time: (m as unknown as { updatedAt?: Date }).updatedAt ?? new Date() });
+      } else if (m.status === 'DISPUTED') {
+        activities.push({ icon: 'alert', text: `Dispute raised on: ${m.title}`, time: (m as unknown as { updatedAt?: Date }).updatedAt ?? new Date() });
+      }
+    }
+
+    // Also surface recently funded or completed jobs
+    for (const j of jobs.filter(j => ['FUNDED', 'COMPLETED'].includes(j.status)).slice(0, 5)) {
+      if (j.status === 'FUNDED') {
+        activities.push({ icon: 'fund', text: `New project funded: ${j.title}`, time: (j as unknown as { updatedAt?: Date }).updatedAt ?? new Date() });
+      } else {
+        activities.push({ icon: 'done', text: `Project completed: ${j.title}`, time: (j as unknown as { updatedAt?: Date }).updatedAt ?? new Date() });
+      }
+    }
+
+    activities.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+
+    res.json({ success: true, data: { activities: activities.slice(0, 10) } });
   } catch (err) { next(err); }
 });
 
