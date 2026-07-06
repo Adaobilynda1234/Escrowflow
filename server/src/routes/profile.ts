@@ -156,46 +156,44 @@ router.patch('/notifications', validate(notificationsSchema), async (req, res, n
   } catch (err) { next(err); }
 });
 
+const typeLabel: Record<string, string> = {
+  FUNDS_RECEIVED: 'Escrow Funding',
+  FUNDS_HELD: 'Escrow Funding',
+  FUNDS_RELEASED: 'Milestone Release',
+  FUNDS_REFUNDED: 'Refund',
+};
+
 // GET /profile/transactions?role=CLIENT|PROVIDER&filter=all|incoming|outgoing
 router.get('/transactions', async (req, res, next) => {
   try {
     const userId = req.user!.userId;
     const role = req.query.role === 'PROVIDER' ? 'PROVIDER' : 'CLIENT';
-    const filter = typeof req.query.filter === 'string' ? req.query.filter : 'all';
+    const filter = ['all', 'incoming', 'outgoing'].includes(req.query.filter as string)
+      ? req.query.filter as string
+      : 'all';
     const jobFilter = role === 'CLIENT' ? { clientId: userId } : { providerId: userId };
     const jobs = await Job.find(jobFilter).populate('clientId providerId', 'name').lean();
     const jobMap = new Map(jobs.map(j => [j._id.toString(), j]));
     const jobIds = jobs.map(j => j._id);
 
-    const entries = await LedgerEntry.find({ jobId: { $in: jobIds } })
-      .sort({ createdAt: -1 })
-      .limit(100)
+    // Fetch ALL entries for correct stats (no limit here)
+    // ponytail: unbounded fetch; add pagination/aggregation if ledger grows very large
+    const allEntries = await LedgerEntry.find({ jobId: { $in: jobIds } })
+      .select('type amountKobo createdAt jobId')
       .lean();
 
     const now = new Date();
     const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    let totalReceivedKobo = 0, totalPaidOutKobo = 0, pendingReleaseKobo = 0, thisMonthKobo = 0;
+    let totalReceivedKobo = 0, totalPaidOutKobo = 0, thisMonthKobo = 0;
 
-    const rows = entries.map(e => {
+    const allRows = allEntries.map(e => {
       const job = jobMap.get(e.jobId.toString());
       const isIncoming = (role === 'CLIENT' && e.type === 'FUNDS_REFUNDED') ||
                          (role === 'PROVIDER' && e.type === 'FUNDS_RELEASED');
       const direction = isIncoming ? 'incoming' : 'outgoing';
-
-      if (isIncoming) totalReceivedKobo += e.amountKobo;
-      else totalPaidOutKobo += e.amountKobo;
-      if (new Date(e.createdAt) >= firstOfMonth) thisMonthKobo += e.amountKobo;
-
-      const typeLabel: Record<string, string> = {
-        FUNDS_RECEIVED: 'Escrow Funding',
-        FUNDS_HELD: 'Escrow Funding',
-        FUNDS_RELEASED: 'Milestone Release',
-        FUNDS_REFUNDED: 'Refund',
-      };
       const counterparty = role === 'CLIENT'
         ? (job?.providerId as { name: string } | undefined)?.name ?? 'Unknown'
         : (job?.clientId as { name: string } | undefined)?.name ?? 'Unknown';
-
       return {
         txnId: `TXN-${e._id.toString().slice(-4).toUpperCase()}`,
         project: job?.title ?? 'Unknown',
@@ -206,17 +204,30 @@ router.get('/transactions', async (req, res, next) => {
         direction,
         status: 'Completed',
       };
-    }).filter(r => filter === 'all' || r.direction === filter);
+    });
+
+    // Stats from ALL entries (no limit)
+    for (const r of allRows) {
+      if (r.direction === 'incoming') totalReceivedKobo += r.amountKobo;
+      else totalPaidOutKobo += r.amountKobo;
+      if (new Date(r.date) >= firstOfMonth) thisMonthKobo += r.amountKobo;
+    }
 
     // Pending release = held funds on active jobs
     const activeJobs = jobs.filter(j => ['FUNDED', 'IN_PROGRESS'].includes(j.status));
-    pendingReleaseKobo = activeJobs.reduce((s, j) => s + j.heldAmountKobo, 0);
+    const pendingReleaseKobo = activeJobs.reduce((s, j) => s + j.heldAmountKobo, 0);
+
+    // Apply direction filter, sort desc, limit 100 for list display
+    const transactions = allRows
+      .filter(r => filter === 'all' || r.direction === filter)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, 100);
 
     res.json({
       success: true,
       data: {
         stats: { totalReceivedKobo, totalPaidOutKobo, pendingReleaseKobo, thisMonthKobo },
-        transactions: rows,
+        transactions,
       },
     });
   } catch (err) { next(err); }
@@ -234,7 +245,7 @@ router.get('/disputes', async (req, res, next) => {
 
     const milestones = await Milestone.find({
       jobId: { $in: jobIds },
-      status: { $in: ['DISPUTED', 'REFUNDED', 'REFUND_PENDING'] },
+      status: { $in: ['DISPUTED', 'REFUNDED'] },
     }).sort({ updatedAt: -1 }).lean();
 
     const open = milestones.filter(m => m.status === 'DISPUTED').length;
