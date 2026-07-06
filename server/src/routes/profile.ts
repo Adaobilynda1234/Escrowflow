@@ -40,8 +40,16 @@ router.patch('/bank', validate(bankSchema), async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+const updateProfileSchema = z.object({
+  name: z.string().min(2).max(100).optional(),
+  phone: z.string().min(7).max(20).optional(),
+  location: z.string().max(200).optional(),
+  bio: z.string().max(500).optional(),
+  avatar: z.string().url().max(500).optional(),
+});
+
 // PATCH /profile/me — update name, phone, location, bio, avatar
-router.patch('/me', async (req, res, next) => {
+router.patch('/me', validate(updateProfileSchema), async (req, res, next) => {
   try {
     const allowed = ['name', 'phone', 'location', 'bio', 'avatar'];
     const updates: Record<string, unknown> = {};
@@ -122,8 +130,20 @@ router.get('/notifications', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+const notifPrefsEntrySchema = z.object({ email: z.boolean(), push: z.boolean() });
+const notificationsSchema = z.object({
+  milestoneComplete: notifPrefsEntrySchema.optional(),
+  milestoneApproved: notifPrefsEntrySchema.optional(),
+  projectFunded: notifPrefsEntrySchema.optional(),
+  newInvitation: notifPrefsEntrySchema.optional(),
+  paymentReleased: notifPrefsEntrySchema.optional(),
+  paymentReceived: notifPrefsEntrySchema.optional(),
+  escrowLowBalance: notifPrefsEntrySchema.optional(),
+  disputeUpdate: notifPrefsEntrySchema.optional(),
+});
+
 // PATCH /profile/notifications
-router.patch('/notifications', async (req, res, next) => {
+router.patch('/notifications', validate(notificationsSchema), async (req, res, next) => {
   try {
     const user = await User.findByIdAndUpdate(
       req.user!.userId,
@@ -131,7 +151,7 @@ router.patch('/notifications', async (req, res, next) => {
       { new: true, select: 'notificationPrefs' }
     );
     if (!user) throw new AppError(404, 'User not found');
-    res.json({ success: true, data: { prefs: user.notificationPrefs } });
+    res.json({ success: true, data: { prefs: user.notificationPrefs ?? DEFAULT_PREFS } });
   } catch (err) { next(err); }
 });
 
