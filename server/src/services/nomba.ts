@@ -91,7 +91,10 @@ export async function createVirtualAccount(
   try {
     const res = await axios.post(
       `${BASE_URL}/v1/accounts/virtual/${SUB_ACCOUNT_ID}`,
-      { accountRef: `job-${jobId}`, accountName: `EscrowFlow Job ${jobId}` },
+      // ponytail: Nomba rejects any digit in accountName ("must not contain special
+      // characters") — jobId is a hex ObjectId, so it can never go in this field.
+      // accountRef (which the webhook actually correlates on) has no such restriction.
+      { accountRef: `job-${jobId}`, accountName: 'EscrowFlow Job Payment' },
       { headers: await nombaHeaders() }
     );
     const data = res.data?.data;
