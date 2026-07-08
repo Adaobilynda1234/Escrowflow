@@ -13,9 +13,63 @@ if (!WEBHOOK_SECRET) {
 
 const router = Router();
 
+// Real Nomba webhook shape — confirmed against https://developer.nomba.com/docs/api-basics/webhook
+// (the previous implementation guessed at eventType/accountReference/amount and was never
+// compatible with what Nomba actually sends).
+export interface NombaWebhookPayload {
+  event_type: string;
+  requestId: string;
+  data: {
+    merchant: { userId: string; walletId: string; walletBalance?: number };
+    transaction: {
+      transactionId: string;
+      type: string;
+      time: string;
+      responseCode?: string | null;
+      transactionAmount: number;
+      aliasAccountReference?: string;
+      aliasAccountNumber?: string;
+      aliasAccountType?: string;
+    };
+    customer?: { senderName?: string; bankCode?: string; accountNumber?: string };
+  };
+}
+
+// Nomba's canonical signing string has a mandated field order — see the doc link above.
+// A literal "null" responseCode (as opposed to it being absent) is normalised to ''.
+export function buildNombaSignedString(payload: NombaWebhookPayload, timestamp: string): string {
+  const { merchant, transaction } = payload.data;
+  const responseCode =
+    !transaction.responseCode || transaction.responseCode === 'null' ? '' : transaction.responseCode;
+  return [
+    payload.event_type,
+    payload.requestId,
+    merchant.userId,
+    merchant.walletId,
+    transaction.transactionId,
+    transaction.type,
+    transaction.time,
+    responseCode,
+    timestamp,
+  ].join(':');
+}
+
+export function verifyNombaSignature(
+  payload: NombaWebhookPayload,
+  timestamp: string,
+  signature: string,
+  secret: string
+): boolean {
+  const expected = crypto
+    .createHmac('sha256', secret)
+    .update(buildNombaSignedString(payload, timestamp))
+    .digest('base64');
+  const sigBuf = Buffer.from(signature);
+  const expectedBuf = Buffer.from(expected);
+  return sigBuf.length === expectedBuf.length && crypto.timingSafeEqual(sigBuf, expectedBuf);
+}
+
 // POST /payments/webhook
-// express.raw() captures the body as a Buffer so HMAC is computed over the exact bytes
-// Nomba signed, not a re-serialised version that may differ in whitespace or key order.
 router.post(
   '/webhook',
   express.raw({ type: 'application/json' }),
@@ -23,47 +77,34 @@ router.post(
     try {
       const rawBody = req.body as Buffer;
       const signature = req.headers['nomba-signature'] as string | undefined;
+      const timestamp = req.headers['nomba-timestamp'] as string | undefined;
 
-      // Verify HMAC-SHA256 signature over raw bytes
-      // Nomba may deliver the signature as hex or base64 — accept both
-      const hmac = crypto.createHmac('sha256', WEBHOOK_SECRET).update(rawBody);
-      const expectedHex = hmac.digest('hex');
-      const expectedB64 = crypto
-        .createHmac('sha256', WEBHOOK_SECRET)
-        .update(rawBody)
-        .digest('base64');
-
-      const sig = signature ?? '';
-      const matchHex =
-        sig.length === expectedHex.length &&
-        crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedHex));
-      const matchB64 =
-        sig.length === expectedB64.length &&
-        crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expectedB64));
-      const valid = matchHex || matchB64;
-
-      if (!valid) {
-        res.status(401).json({ error: 'Invalid signature' });
+      let payload: NombaWebhookPayload;
+      try {
+        payload = JSON.parse(rawBody.toString('utf8'));
+      } catch {
+        res.status(400).json({ error: 'Invalid JSON payload' });
         return;
       }
 
-      // Fix 4: Validate parsed webhook payload
-      const payload = JSON.parse(rawBody.toString('utf8'));
-      if (!payload || typeof payload !== 'object') {
-        res.status(400).json({ error: 'Invalid webhook payload' });
-        return;
-      }
-      const { eventId, eventType, data: eventData } = payload as {
-        eventId: string;
-        eventType: string;
-        data: Record<string, unknown>;
-      };
-      if (!eventId || !eventType || !eventData || typeof eventData !== 'object') {
+      if (
+        !payload?.event_type ||
+        !payload.requestId ||
+        !payload.data?.merchant?.userId ||
+        !payload.data?.transaction?.transactionId
+      ) {
         res.status(400).json({ error: 'Missing required webhook fields' });
         return;
       }
 
-      // Fix 3: Tightened idempotency — any existing record (even unprocessed) short-circuits
+      if (!signature || !timestamp || !verifyNombaSignature(payload, timestamp, signature, WEBHOOK_SECRET)) {
+        res.status(401).json({ error: 'Invalid signature' });
+        return;
+      }
+
+      const eventId = payload.data.transaction.transactionId;
+
+      // Idempotency — any existing record (even unprocessed) short-circuits
       const existing = await WebhookEvent.findOne({ eventId });
       if (existing) {
         res.json({ received: true, duplicate: true });
@@ -73,16 +114,13 @@ router.post(
       // Record event before processing (upsert so duplicate delivery before processing is safe)
       await WebhookEvent.findOneAndUpdate(
         { eventId },
-        { eventId, eventType, payload: { eventId, eventType, data: eventData }, processed: false },
+        { eventId, eventType: payload.event_type, payload, processed: false },
         { upsert: true }
       );
 
-      if (eventType === 'payment.received') {
-        const accountReference = typeof eventData.accountReference === 'string'
-          ? eventData.accountReference
-          : '';
+      if (payload.event_type === 'payment_success') {
+        const accountReference = payload.data.transaction.aliasAccountReference ?? '';
 
-        // Fix 5: Safe accountReference extraction
         if (!accountReference.startsWith('job-')) {
           console.error('[Webhook] Unrecognised accountReference:', accountReference);
           res.json({ received: true });
@@ -90,10 +128,10 @@ router.post(
         }
         const jobId = accountReference.slice(4); // 'job-'.length === 4
 
-        // Nomba sends amount in naira (their API unit); convert to kobo for storage
-        const rawAmount = Number(eventData.amount);
+        // Nomba sends amount in naira; convert to kobo for storage
+        const rawAmount = Number(payload.data.transaction.transactionAmount);
         if (!rawAmount || rawAmount <= 0) {
-          console.error('[Webhook] Invalid amount in payload:', eventData.amount);
+          console.error('[Webhook] Invalid amount in payload:', payload.data.transaction.transactionAmount);
           res.status(400).json({ error: 'Invalid amount' });
           return;
         }
@@ -106,14 +144,9 @@ router.post(
         } else {
           const session = await mongoose.startSession();
           try {
-            // Fix 2: Mark processed inside the transaction — atomic with ledger writes
             await session.withTransaction(async () => {
-              await creditHeldFunds(jobId, amountKobo as number, eventId, session);
-              await WebhookEvent.findOneAndUpdate(
-                { eventId },
-                { processed: true },
-                { session }
-              );
+              await creditHeldFunds(jobId, amountKobo, eventId, session);
+              await WebhookEvent.findOneAndUpdate({ eventId }, { processed: true }, { session });
             });
           } finally {
             session.endSession();
