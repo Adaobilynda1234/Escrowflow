@@ -12,6 +12,7 @@ Built for the **Nomba Hackathon 2026**, powered by [Nomba](https://nomba.com)'s 
 
 ## Table of Contents
 
+- [For Reviewers](#for-reviewers)
 - [How It Works](#how-it-works)
 - [Features](#features)
 - [Tech Stack](#tech-stack)
@@ -25,6 +26,45 @@ Built for the **Nomba Hackathon 2026**, powered by [Nomba](https://nomba.com)'s 
 - [Roadmap](#roadmap)
 
 ---
+
+## For Reviewers
+
+### Demo accounts
+
+Two dedicated accounts exist on the live app for review — please don't reuse these for anything beyond testing:
+
+| Role | Email | Password |
+|---|---|---|
+| Client | `demo.client@escrowflow.test` | `DemoPass123` |
+| Provider | `demo.provider@escrowflow.test` | `DemoPass123` |
+
+Log in as the client at [escrowflow-nu.vercel.app/login](https://escrowflow-nu.vercel.app/login), or sign up your own pair of accounts (one client, one provider) if you'd rather see the onboarding flow too.
+
+### Walkthrough
+
+1. **Create a job** — as the client, go to *Projects → New Project*, fill in a title/description, set `demo.provider@escrowflow.test` as the provider, and add at least one milestone with an amount.
+2. **Fund it** — open the job detail page and trigger virtual account creation. You'll get a dedicated Nomba virtual account number and a QR code. In sandbox, funding this account requires a real or simulated Nomba transfer — see the testing log below for how the funding path was verified without needing a live transfer for every review pass.
+3. **Do the work** — log in as the provider, open the job, and mark the milestone complete (optionally attach evidence).
+4. **Approve payout** — back as the client, approve the milestone. This triggers an automatic bank transfer to the provider's saved bank account and moves funds from held → released in the ledger.
+5. **Dispute / refund** — either party can dispute a completed-but-not-yet-approved milestone from the job page; an admin then resolves it (approve or refund) from the admin dashboard.
+
+### Testing log
+
+Because Nomba's sandbox caps virtual account creation at **2 per account holder for the account's lifetime** (not a rolling window — expiring an account doesn't free the slot) and a full funding cycle needs a real bank transfer, the payment engine was verified end-to-end by sending correctly-shaped, correctly-signed webhook events directly at the deployed API — the same code path a real Nomba delivery exercises, bypassing only the actual bank transfer step:
+
+| Path | What was verified | Result |
+|---|---|---|
+| Webhook signature verification | HMAC-SHA256 over Nomba's documented canonical string (`event_type:requestId:userId:walletId:transactionId:type:time:responseCode:timestamp`), confirmed against [Nomba's official docs](https://developer.nomba.com/docs/api-basics/webhook) and the real signing key registered on Nomba's dashboard | Pass |
+| Webhook funding | Signed `payment_success` event referencing a real job → escrow ledger credited | `heldAmountKobo` `0 → 10000`, status `CREATED → FUNDED` |
+| Webhook idempotency | Same event redelivered | No-ops with `{"duplicate":true}`, no double-credit |
+| Milestone approval payout | Provider marks complete → client approves | `heldAmountKobo → 0`, `releasedAmountKobo → 10000`; ledger entries correct even when the destination bank account itself is fake test data (the actual Nomba transfer step fails independently of the escrow accounting) |
+| Dispute + admin refund | Milestone disputed → admin resolves with `refund` | `heldAmountKobo` correctly returned to `0`, milestone `REFUNDED`, job `REFUND_PENDING` |
+| Virtual account creation | Nomba API call directly, isolating field validation | Confirmed working (see Known Limitations for the sandbox quota that blocks *repeated* live testing) |
+
+### Known limitations
+
+- **Nomba sandbox virtual account quota** — capped at 2 virtual accounts per account holder, for the account's lifetime. If funding a job's virtual account fails with a vague error, this is very likely why — ask Nomba to raise the sandbox quota for further live testing.
+- **Render free tier cold starts** — the backend sleeps after ~15 minutes of inactivity; the first request after a lull can take 10-50+ seconds. A real Nomba webhook delivered during that window could time out before the instance wakes up. Recommended fix before relying on this for a live demo: an external uptime pinger (e.g. UptimeRobot) hitting `/health` every 5-10 minutes, or upgrading off the free tier.
 
 ## How It Works
 
@@ -42,7 +82,7 @@ Built for the **Nomba Hackathon 2026**, powered by [Nomba](https://nomba.com)'s 
 - **Milestone-based escrow** with a full status lifecycle (`CREATED → FUNDING_PENDING → FUNDED → IN_PROGRESS → COMPLETED`, plus `DISPUTED`, `REFUND_PENDING`, `REFUNDED`, `CANCELLED`)
 - **Nomba virtual accounts** — a dedicated funding account per job, with QR-code funding in the UI
 - **Double-entry ledger engine** — every movement of funds (received, held, released, refunded) is an immutable, appendable ledger row, never mutated
-- **Signed webhook receiver** — HMAC-SHA256 verified (hex or base64), idempotent by `eventId`, so replayed or duplicate Nomba events can't double-process a payment
+- **Signed webhook receiver** — verifies Nomba's HMAC-SHA256 signature over its documented canonical field string (not the raw body), idempotent by transaction ID, so replayed or duplicate Nomba events can't double-process a payment
 - **Automatic payout on approval**, with an **auto-release cron** as a safety net if the client goes quiet
 - **Dispute resolution workflow** for both users and admins
 - **Evidence upload** — providers attach proof of completed work via Cloudinary
@@ -225,7 +265,7 @@ Base URL: backend root (no `/api` prefix). All write endpoints validate input wi
 **Payments** (`/payments`)
 | Method | Path | Description |
 |---|---|---|
-| POST | `/payments/webhook` | Nomba webhook receiver — HMAC-verified, idempotent by `eventId` (public, signature-authenticated instead of JWT) |
+| POST | `/payments/webhook` | Nomba webhook receiver — HMAC-verified against Nomba's canonical signing scheme, idempotent by transaction ID (public, signature-authenticated instead of JWT) |
 
 **Profile** (`/profile`)
 | Method | Path | Description |
@@ -276,7 +316,7 @@ All money amounts are stored in **kobo** (the smallest Naira unit) to avoid floa
 - [x] Auth (JWT) with client/provider dual roles
 - [x] Job creation with milestone setup
 - [x] Nomba virtual account funding + QR code
-- [x] Webhook-driven ledger engine
+- [x] Webhook-driven ledger engine (signature verification and payload parsing confirmed against Nomba's official docs; funding, payout, and refund paths verified end-to-end)
 - [x] Milestone approval → automatic payout
 - [x] Auto-release timeout safety net
 - [x] Dispute raising + admin resolution
